@@ -1,0 +1,80 @@
+# -*- mode: ruby -*-
+ 
+VAGRANTFILE_API_VERSION = "2"
+ 
+Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
+  config.vm.box = "precise32"
+  config.vm.box_url = "http://files.vagrantup.com/precise32.box"
+  config.vm.network "forwarded_port", guest: 3000, host: 3333
+  config.vm.synced_folder "../project_folder_host", “/project_folder_guest”
+ 
+  config.vm.provider "virtualbox" do |vb|
+    vb.customize ["modifyvm", :id, "--memory", "1024"]
+    
+    #Стартуем скрипт
+    config.vm.provision :shell, :path => "/vagrant/zabbix.sh"
+ 
+
+ 
+  # Zabbix
+  
+  
+   config.vm.provision "shell", inline: <<-SHELL
+  sudo  apt-get update
+  host='hostname'
+if [ "$host"="server" ]; then
+echo "server located"
+#Packets
+sudo apt-get install php-gd php-bcmath php-mbstring php-xml php-ldap php-json php-mysql php-curl php-cgi php libapache2-mod-php -y && sudo apt-get install apache2 && sudo apt-get install mariadb-server mariadb-client -y 
+
+sudo systemctl start apache2
+
+#DATABASE
+sudo systemctl start mariadb
+sudo systemctl enable mariadb
+
+mysql_secure_installation <<EOF
+
+n
+y
+y
+y
+y
+EOF
+
+sudo mysql -u root -e "create database zabbix character set utf8 collate utf8_bin;"
+sudo mysql -u root -e "create user 'zabbix'@localhost identified by '123456';"
+sudo mysql -u root -e "GRANT ALL PRIVILEGES ON zabbix.* TO 'zabbix'@localhost;"
+sudo mysql -u root -e "FLUSH PRIVILEGES;"
+
+#install zabbix
+wget -P /tmp https://repo.zabbix.com/zabbix/5.2/debian/pool/main/z/zabbix-release/zabbix-release_5.2-1+debian10_all.deb
+sudo dpkg -i /tmp/zabbix-release_5.2-1+debian10_all.deb
+rm /tmp/zabbix-release_5.2-1+debian10_all.deb
+sudo apt-get update
+sudo apt-get install zabbix-server-mysql zabbix-frontend-php zabbix-apache-conf zabbix-agent -y
+
+sudo zcat /usr/share/doc/zabbix-server-mysql/create.sql.gz | mysql -uzabbix -p'123456' zabbix 
+
+#Zabbix config
+sed -i "/\# DBHost=/c DBHost=localhost" /etc/zabbix/zabbix_server.conf
+sed -i "/DBHost=/c DBHost=localhost" /etc/zabbix/zabbix_server.conf
+sed -i "/\# DBName=/d" /etc/zabbix/zabbix_server.conf
+sed -i "/DBName=/c DBName=zabbix" /etc/zabbix/zabbix_server.conf
+sed -i "/\# DBUser=/d" /etc/zabbix/zabbix_server.conf
+sed -i "/DBUser=/c DBUser=zabbix" /etc/zabbix/zabbix_server.conf
+sed -i "/\# DBPassword=/c DBPassword=123456" /etc/zabbix/zabbix_server.conf
+sed -i "/DBPassword=/c DBPassword=123456" /etc/zabbix/zabbix_server.conf
+
+#Apache config
+sed -i "/\# php_value date.timezone/c \ \ \ \ \ \ \php_value date.timezone Europe.Minsk" /etc/zabbix/apache.conf
+
+sudo systemctl restart apache2 mariadb
+
+sudo systemctl start zabbix-server zabbix-agent
+sudo systemctl enable zabbix-server zabbix-agent
+else
+echo "Not found access hostname"
+fi
+   SHELL
+end
